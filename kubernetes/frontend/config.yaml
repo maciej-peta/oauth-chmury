@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+data:
+  NODE_ENV: "production"
+  NEXT_PUBLIC_BACKEND_URL: "http://backend.local"
+  NEXTAUTH_URL: "http://frontend.local/"
+  AUTH_TRUST_HOST: "http://frontend.local/"
+  BACKEND_URL: "http://backend.local"
+  AUTH0_CLIENT_ID: "iTO7dExr0IB9NIexRwAApKKEZQgBxMOh"
+  AUTH0_DOMAIN: "file-conversion-tenant.eu.auth0.com"
+  AUTH0_ISSUER: "https://file-conversion-tenant.eu.auth0.com"
+

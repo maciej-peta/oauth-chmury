@@ -1,0 +1,99 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
+        ARCH: ${ARCH:-amd64}
+    platform: linux/${ARCH:-amd64}
+    ports:
+      - "3000:3000"
+    networks:
+      - net
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_URL=http://localhost:3000
+      - AUTH_TRUST_HOST=http://localhost:3000
+      - BACKEND_URL=http://backend:8000
+      - AUTH0_CLIENT_ID=iTO7dExr0IB9NIexRwAApKKEZQgBxMOh
+      - AUTH0_DOMAIN=file-conversion-tenant.eu.auth0.com
+      - AUTH0_ISSUER=https://file-conversion-tenant.eu.auth0.com
+    secrets:
+      - NEXTAUTH_SECRET
+      - AUTH0_CLIENT_SECRET  
+    command: >
+      sh -c "
+        export NEXTAUTH_SECRET=$(cat /run/secrets/NEXTAUTH_SECRET) &&
+        export AUTH0_CLIENT_SECRET=$(cat /run/secrets/AUTH0_CLIENT_SECRET) &&
+        npm start
+      "
+    stop_grace_period: 5s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://frontend:3000/api/health"]
+      interval: 20s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:17.5
+    container_name: conversion_db
+    restart: on-failure
+    environment:
+      POSTGRES_DB: conversion_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 20s
+      timeout: 3s
+      retries: 2
+      start_period: 10s      
+    secrets:
+      - NEXTAUTH_SECRET
+      - AUTH0_CLIENT_SECRET  
+    ports:
+      - "5432:5432"
+    networks:
+     - net
+    volumes:
+      - ./db:/docker-entrypoint-initdb.d
+      - pgdata:/var/lib/postgresql/data
+      
+  backend:
+    build:
+      context: ./backend
+      args:
+        ARCH: ${ARCH:-amd64}
+    platform: linux/${ARCH:-amd64}
+    networks:
+     - net
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATABASE_INFO=host=postgres port=5432 user=postgres password=postgres dbname=conversion_db sslmode=disable
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 3s
+      retries: 2
+      start_period: 10s
+
+volumes:
+  pgdata:
+
+secrets:
+  NEXTAUTH_SECRET:
+    file: ./secrets/NEXTAUTH_SECRET
+  AUTH0_CLIENT_SECRET:
+    file: ./secrets/AUTH0_CLIENT_SECRET
+
+networks:
+  net:
+    driver: bridge
+
