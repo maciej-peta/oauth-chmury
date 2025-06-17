@@ -2,100 +2,36 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"github.com/chai2010/webp"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"net/http"
+	"time"
 )
 
+//<editor-fold desc="Settings">
+
+// Encoder/decoder tags
 const (
 	jpegTag = "jpeg"
 	pngTag  = "png"
 	webpTag = "webp"
 )
 
+// conversion timer settings
 const (
-	minimumConversionTime = 5.0
-
+	minimumConversionTime  = 5.0 // seconds
 	minimumKBTransferSpeed = 20.0
 )
 
-//<editor-fold desc="Decoders and encoders">
+//</editor-fold>
 
-func jpegEncoder(writer http.ResponseWriter, image image.Image) error {
-	writer.Header().Set("Content-Type", "image/jpg")
-
-	options := &jpeg.Options{
-		Quality: 90,
-	}
-
-	encodingErr := jpeg.Encode(writer, image, options)
-	if encodingErr != nil {
-		http.Error(writer, "failed to encode JPG.", http.StatusInternalServerError)
-		return encodingErr
-	}
-	return nil
-}
-
-func pngEncoder(writer http.ResponseWriter, image image.Image) error {
-	writer.Header().Set("Content-Type", "image/png")
-
-	encodingErr := png.Encode(writer, image)
-	if encodingErr != nil {
-		http.Error(writer, "failed to encode PNG.", http.StatusInternalServerError)
-		return encodingErr
-	}
-	return nil
-}
-
-func webpEncoder(writer http.ResponseWriter, image image.Image) error {
-	writer.Header().Set("Content-Type", "image/webp")
-
-	options := &webp.Options{
-		Lossless: true,
-	}
-
-	encodingErr := webp.Encode(writer, image, options)
-	if encodingErr != nil {
-		http.Error(writer, "failed to encode file.", http.StatusInternalServerError)
-		return encodingErr
-	}
-	return nil
-}
-
-func getDecoder(decoderTag string) func(r io.Reader) (image.Image, error) {
-	switch decoderTag {
-	case jpegTag:
-		return jpeg.Decode
-	case pngTag:
-
-		return png.Decode
-	case webpTag:
-		return webp.Decode
-	default:
-		return nil
-	}
-}
-
-func getEncoder(encoderTag string) func(writer http.ResponseWriter, image image.Image) error {
-	switch encoderTag {
-	case jpegTag:
-		return jpegEncoder
-	case pngTag:
-		return pngEncoder
-	case webpTag:
-		return webpEncoder
-	default:
-		return nil
-	}
-}
-
-//</editor-fold">
-
-// <editor-fold desc="jpeg handlers">
+// <editor-fold desc="image handler">
 
 func imageHandlerFactory(decoderTag string, encoderTag string) func(writer http.ResponseWriter, request *http.Request) {
 
@@ -151,29 +87,31 @@ func imageHandlerFactory(decoderTag string, encoderTag string) func(writer http.
 		}
 
 		//setting up a timer so nobody tries to transfer 1kb/s or something akin to that
-		//timeout := calculateTimeout(maxFileSizeMB)
-		//contx, cancel := context.WithTimeout(request.Context(), timeout)
-		//defer cancel()
+		timeout := calculateTimeout(maxFileSizeMB)
+		contx, cancel := context.WithTimeout(request.Context(), timeout)
+		defer cancel()
 
 		//reading the file and checking if its the right size
 
-		//request = request.WithContext(contx)
+		request = request.WithContext(contx)
 		limitedReader := http.MaxBytesReader(writer, request.Body, int64(maxFileSizeMB*megabyte))
 		defer limitedReader.Close()
 
-		bodySize, readErr := io.ReadAll(limitedReader)
+		// Use readWithTimeout instead of io.ReadAll directly
+		bodySize, readErr := readWithTimeout(contx, limitedReader)
 
 		if readErr != nil {
 			var maxBytesErr *http.MaxBytesError
+			// Timeout?
+			if errors.Is(readErr, context.DeadlineExceeded) {
+				http.Error(writer, "Request timed out.", http.StatusRequestTimeout)
+				return
+			}
+			// Max size exceeded?
 			if errors.As(readErr, &maxBytesErr) {
 				http.Error(writer, "The file provided exceeds your account limit.", http.StatusRequestEntityTooLarge)
 				return
 			}
-
-			//if errors.Is(contx.Err(), context.DeadlineExceeded) {
-			//	http.Error(writer, "Request timed out.", http.StatusRequestTimeout)
-			//	return
-			//}
 
 			http.Error(writer, "Failed to read file.", http.StatusBadRequest)
 			return
@@ -205,13 +143,106 @@ func imageHandlerFactory(decoderTag string, encoderTag string) func(writer http.
 
 //</editor-fold>
 
-//timer
+// <editor-fold desc="Encoders and decoders">
 
-//func calculateTimeout(maxMB int) time.Duration {
-//
-//	//maxKB := 1024.0 * float64(maxMB)               // Convert MB to KB
-//	//transferTime := maxKB / minimumKBTransferSpeed // Time in seconds
-//	//result := math.Max(minimumConversionTime, transferTime)
-//
-//	return time.Duration(1 * float64(time.Second))
-//}
+func jpegEncoder(writer http.ResponseWriter, image image.Image) error {
+	writer.Header().Set("Content-Type", "image/jpg")
+
+	options := &jpeg.Options{
+		Quality: 90,
+	}
+
+	encodingErr := jpeg.Encode(writer, image, options)
+	if encodingErr != nil {
+		http.Error(writer, "failed to encode JPG.", http.StatusInternalServerError)
+		return encodingErr
+	}
+	return nil
+}
+
+func pngEncoder(writer http.ResponseWriter, image image.Image) error {
+	writer.Header().Set("Content-Type", "image/png")
+
+	encodingErr := png.Encode(writer, image)
+	if encodingErr != nil {
+		http.Error(writer, "failed to encode PNG.", http.StatusInternalServerError)
+		return encodingErr
+	}
+	return nil
+}
+
+func webpEncoder(writer http.ResponseWriter, image image.Image) error {
+	writer.Header().Set("Content-Type", "image/webp")
+
+	options := &webp.Options{
+		Lossless: true,
+	}
+
+	encodingErr := webp.Encode(writer, image, options)
+	if encodingErr != nil {
+		http.Error(writer, "failed to encode file.", http.StatusInternalServerError)
+		return encodingErr
+	}
+	return nil
+}
+
+func getDecoder(decoderTag string) func(r io.Reader) (image.Image, error) {
+	switch decoderTag {
+	case jpegTag:
+		return jpeg.Decode
+	case pngTag:
+		return png.Decode
+	case webpTag:
+		return webp.Decode
+	default:
+		return nil
+	}
+}
+
+func getEncoder(encoderTag string) func(writer http.ResponseWriter, image image.Image) error {
+	switch encoderTag {
+	case jpegTag:
+		return jpegEncoder
+	case pngTag:
+		return pngEncoder
+	case webpTag:
+		return webpEncoder
+	default:
+		return nil
+	}
+}
+
+//</editor-fold>
+
+//<editor-fold desc="Timeout">
+
+func readWithTimeout(ctx context.Context, r io.Reader) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	results := make(chan result, 1)
+
+	go func() {
+		data, err := io.ReadAll(r)
+		results <- result{data, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-results:
+		return res.data, res.err
+	}
+}
+
+func calculateTimeout(maxMB int) time.Duration {
+
+	maxKB := 1024.0 * float64(maxMB)               // Converting MB to KB
+	transferTime := maxKB / minimumKBTransferSpeed // Time in seconds
+	secs := math.Max(minimumConversionTime, transferTime)
+	return time.Duration(secs * float64(time.Second))
+
+}
+
+// </editor-fold>
