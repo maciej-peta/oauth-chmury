@@ -6,7 +6,7 @@ import (
 
 // used multiple smaller functions in here first but then I realized I could simplify
 // it to just one request, which would shorten meantime to complete conversion way down
-func canUserConvert(db *sql.DB, authID string) (bool, int, error) { //todo: clean up this method so it doesnt use bool
+func canUserConvert(db *sql.DB, authID string) (bool, int, error) {
 	var maxInteractions, maxFileSizeMB, recentConversions int
 
 	query := `

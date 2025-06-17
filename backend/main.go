@@ -82,9 +82,3 @@ func main() {
 		log.Printf("Server started")
 	}
 }
-
-//todo: verify limits of requests
-
-//todo: add a timeout for data transfer into the server
-
-//seems its ok and if i do these 2 ^ it should be ok to send in

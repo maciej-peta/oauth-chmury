@@ -9,8 +9,6 @@ import (
 	"net/http"
 )
 
-//todo: get user account type
-
 // User represents a row in the "users" table.
 type User struct {
 	AuthID        string `json:"auth_id"`
@@ -112,10 +110,5 @@ func getUserByAuthIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(u)
 }
-
-//todo: edit user account level (in admin menu?)
-//todo: add a getter to get users account level's max mb file size
-// AND a setter to create new messages
-// AND a getter to get any messages sent within the last month (counter to stop too many uses in a month
 
 //select * from account_types where account_type_id = (select account_type_id from users where auth_id='google-oauth2|111634823248820523553')
